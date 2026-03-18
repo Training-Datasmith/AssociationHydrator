@@ -44,7 +44,6 @@ final class AssociationHydrator
 
     /**
      * @param mixed $subjects
-     * @param string $associationPath
      */
     public function hydrateAssociation($subjects, string $associationPath): void
     {
@@ -57,7 +56,7 @@ final class AssociationHydrator
 
         $classMetadata = $this->classMetadata;
         foreach ($initialAssociations as $initialAssociation) {
-            $subjects = array_reduce($subjects, function (array $accumulator, $subject) use ($initialAssociation) {
+            $subjects = array_reduce($subjects, function (array $accumulator, $subject) use ($initialAssociation): array {
                 $subject = $this->propertyAccessor->getValue($subject, $initialAssociation);
 
                 return array_merge($accumulator, $this->normalizeSubject($subject));
