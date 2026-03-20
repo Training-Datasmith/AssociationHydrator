@@ -10,21 +10,39 @@ use Symfony\Component\Property_Access\Property_Access;
 use Symfony\Component\Property_Access\Property_Accessor;
 final class Association_Hydrator
 {
-    /** @var EntityManagerInterface */
+    /** @var Entity_Manager_Interface The Doctrine entity manager used to build and execute hydration queries */
     private $entity_manager;
-    /** @var ClassMetadata */
+    /** @var Class_Metadata Class metadata for the root subject entity */
     private $class_metadata;
-    /** @var PropertyAccessor */
+    /** @var Property_Accessor Symfony property accessor for reading intermediate association values */
     private $property_accessor;
+
+    /**
+     * Constructs a new hydrator bound to the given entity class metadata.
+     *
+     * @param Entity_Manager_Interface $entity_manager    The Doctrine entity manager.
+     * @param Class_Metadata           $class_metadata    Metadata for the root entity whose associations will be hydrated.
+     * @param ?Property_Accessor       $property_accessor Optional custom property accessor; a default one is created when omitted.
+     */
     public function __construct(Entity_Manager_Interface $entity_manager, Class_Metadata $class_metadata, ?Property_Accessor $property_accessor = null)
     {
         $this->entity_manager = $entity_manager;
         $this->class_metadata = $class_metadata;
         $this->property_accessor = $property_accessor ?? Property_Access::create_property_accessor();
     }
+
     /**
-     * @param mixed $subjects
-     * @param iterable|string[] $associationsPaths
+     * Hydrates multiple association paths on a collection of subject entities.
+     *
+     * Iterates over each path and calls {@see hydrate_association()} for each one.
+     * Use this when you need to warm several associations in a single logical step.
+     *
+     * @param object|object[]|\Doctrine\Common\Collections\Collection<int,object> $subjects         One or more root entities to hydrate.
+     * @param iterable<string>                                                    $associations_paths Dot-notation paths, e.g. ['items', 'items.product'].
+     *
+     * @return void
+     *
+     * @complexity O(p * n) where p = number of paths and n = number of subjects
      */
     public function hydrate_associations($subjects, iterable $associations_paths): void
     {
@@ -32,8 +50,20 @@ final class Association_Hydrator
             $this->hydrate_association($subjects, $association_path);
         }
     }
+
     /**
-     * @param mixed $subjects
+     * Hydrates a single dot-notation association path on a collection of entities.
+     *
+     * Issues a single LEFT JOIN query using PARTIAL SELECT so that the Doctrine
+     * Unit of Work registers the associated objects without re-fetching the root
+     * entity's scalar fields.  Supports nested paths such as 'items.product'.
+     *
+     * @param object|object[]|\Doctrine\Common\Collections\Collection<int,object> $subjects         One or more root entities; a single object is wrapped in an array.
+     * @param string                                                               $association_path Dot-notation path to the target association.
+     *
+     * @return void
+     *
+     * @complexity O(n) database round-trips: always exactly one query regardless of collection size
      */
     public function hydrate_association($subjects, string $association_path): void
     {
@@ -57,9 +87,15 @@ final class Association_Hydrator
         $this->entity_manager->create_query_builder()->select('PARTIAL subject.{id}')->add_select('associations')->from($class_metadata->name, 'subject')->left_join(sprintf('subject.%s', $final_association), 'associations')->where('subject IN (:subjects)')->set_parameter('subjects', array_unique($subjects, \SORT_REGULAR))->get_query()->get_result();
     }
     /**
-     * @param mixed $subject
+     * Normalises the subject argument to a plain PHP array of non-null objects.
      *
-     * @return array|mixed[]
+     * Accepts a single entity object, a plain array, or a Doctrine Collection
+     * and always returns a flat, filtered (no nulls) array suitable for query
+     * construction.
+     *
+     * @param object|object[]|\Doctrine\Common\Collections\Collection<int,object>|null $subject The value to normalise.
+     *
+     * @return list<object> A flat array of non-null entity objects.
      */
     private function normalize_subject($subject): array
     {
